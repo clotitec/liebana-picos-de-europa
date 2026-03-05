@@ -357,13 +357,43 @@ function switchTab(tab) {
     loadDataLayer();
     renderDesktopSidebar();
     renderMobileSheet();
-    updateTabUI();
+
+    // Auto-fetch services when switching to that tab
+    if (tab === 'servicios') {
+        fetchServicesForCurrentFilter();
+    }
+}
+
+async function fetchServicesForCurrentFilter() {
+    const type = activeServiceFilter;
+    if (servicesData[type] && servicesData[type].length > 0) return; // Already loaded
+    try {
+        servicesData[type] = await fetchServices(type);
+        if (activeTab === 'servicios') {
+            loadDataLayer();
+            renderList();
+        }
+    } catch (e) {
+        console.warn('Error fetching services:', e);
+        if (activeTab === 'servicios') renderList();
+    }
+}
+
+function retryServiceFetch() {
+    const type = activeServiceFilter;
+    // Clear cache and state for this type
+    delete servicesData[type];
+    if (typeof servicesState !== 'undefined') delete servicesState[type];
+    try { sessionStorage.removeItem(`overpass_${type}`); } catch (e) {}
+    renderList(); // Show loading spinner
+    fetchServicesForCurrentFilter();
 }
 
 function setServiceFilter(type) {
     activeServiceFilter = type;
     loadDataLayer();
     renderList();
+    fetchServicesForCurrentFilter();
 }
 
 // ==================== SEARCH ====================
@@ -574,18 +604,25 @@ function createRouteCard(route) {
 }
 
 function renderVillageCards() {
-    return `<div class="flex flex-col gap-2">${VILLAGES.map(v => `
-        <div class="card-item bg-white rounded-2xl p-3.5" data-search-text="${v.name} ${(v.tags || []).join(' ')}" onclick="openDetail(VILLAGES.find(x=>x.id==='${v.id}'), 'pueblo')">
+    if (VILLAGES.length === 0) {
+        return `<div class="empty-state"><div class="empty-state-icon">🏘️</div><div class="empty-state-text">No hay pueblos disponibles</div></div>`;
+    }
+    return `
+        <div class="text-xs text-slate-400 mb-2 px-1">${VILLAGES.length} pueblos de Liebana</div>
+        <div class="flex flex-col gap-2">${VILLAGES.map(v => `
+        <div class="card-item bg-white rounded-2xl p-3.5" data-search-text="${v.name} ${v.desc} ${(v.tags || []).join(' ')}" onclick="openDetail(VILLAGES.find(x=>x.id==='${v.id}'), 'pueblo')">
             <div class="flex items-start gap-3">
                 <div class="w-8 h-8 rounded-xl bg-amber-50 text-base flex items-center justify-center flex-shrink-0">🏘️</div>
                 <div class="flex-1 min-w-0">
                     <h3 class="font-bold text-sm text-slate-800">${v.name}</h3>
                     <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">${v.desc}</p>
-                    <div class="flex items-center gap-2 mt-1.5">
+                    <div class="flex items-center gap-2 mt-1.5 flex-wrap">
                         ${v.altitude ? `<span class="text-xs text-slate-500">⛰️ ${v.altitude}m</span>` : ''}
                         ${v.population ? `<span class="text-xs text-slate-500">👥 ${v.population}</span>` : ''}
+                        ${(v.tags || []).slice(0, 2).map(t => `<span class="tag text-[10px] py-0.5 px-1.5">${t}</span>`).join('')}
                     </div>
                 </div>
+                <svg class="w-4 h-4 text-slate-300 flex-shrink-0 mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
             </div>
         </div>
     `).join('')}</div>`;
@@ -594,43 +631,64 @@ function renderVillageCards() {
 function renderServiceCards() {
     const items = servicesData[activeServiceFilter] || [];
     const info = SERVICE_TYPES[activeServiceFilter];
+    const state = typeof getServiceState === 'function' ? getServiceState(activeServiceFilter) : 'idle';
 
     if (items.length === 0) {
+        if (state === 'error') {
+            return `<div class="empty-state">
+                <div class="empty-state-icon">⚠️</div>
+                <div class="empty-state-text">No se pudo cargar ${info?.label || 'servicios'}</div>
+                <p class="text-xs text-slate-400 mt-2">El servidor Overpass no responde</p>
+                <button class="action-btn action-btn-secondary mt-3 mx-auto" onclick="retryServiceFetch()">🔄 Reintentar</button>
+            </div>`;
+        }
         return `<div class="empty-state">
-            <div class="empty-state-icon">${info?.icon || '🔍'}</div>
+            <div class="empty-state-icon">
+                <div class="inline-block" style="animation: spin 1.2s linear infinite;">⏳</div>
+            </div>
             <div class="empty-state-text">Cargando ${info?.label || 'servicios'}...</div>
             <p class="text-xs text-slate-400 mt-2">Consultando OpenStreetMap</p>
         </div>`;
     }
 
-    return `<div class="flex flex-col gap-2">${items.map(item => `
-        <div class="card-item bg-white rounded-2xl p-3.5" data-search-text="${item.name} ${item.address || ''}" onclick="openDetail(servicesData['${activeServiceFilter}'].find(x=>x.id==='${item.id}'), 'servicio')">
+    return `
+        <div class="text-xs text-slate-400 mb-2 px-1">${items.length} ${info?.label || 'resultados'} encontrados</div>
+        <div class="flex flex-col gap-2">${items.map(item => `
+        <div class="card-item bg-white rounded-2xl p-3.5" data-search-text="${item.name} ${item.address || ''} ${item.cuisine || ''}" onclick="openDetail(servicesData['${activeServiceFilter}'].find(x=>x.id==='${item.id}'), 'servicio')">
             <div class="flex items-start gap-3">
                 <div class="service-icon ${item.iconClass}">${item.icon}</div>
                 <div class="flex-1 min-w-0">
                     <h3 class="font-bold text-sm text-slate-800 truncate">${item.name}</h3>
-                    ${item.address ? `<p class="text-xs text-slate-500 mt-0.5">${item.address}</p>` : ''}
-                    ${item.cuisine ? `<p class="text-xs text-slate-400 mt-0.5">${item.cuisine}</p>` : ''}
-                    ${item.phone ? `<p class="text-xs text-blue-500 mt-0.5">${item.phone}</p>` : ''}
+                    ${item.address ? `<p class="text-xs text-slate-500 mt-0.5">📍 ${item.address}</p>` : ''}
+                    ${item.cuisine ? `<p class="text-xs text-slate-400 mt-0.5">🍴 ${item.cuisine}</p>` : ''}
+                    ${item.openingHours ? `<p class="text-xs text-slate-400 mt-0.5">🕐 ${item.openingHours}</p>` : ''}
+                    ${item.phone ? `<p class="text-xs text-blue-500 mt-0.5 font-medium">📞 ${item.phone}</p>` : ''}
                 </div>
+                <svg class="w-4 h-4 text-slate-300 flex-shrink-0 mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
             </div>
         </div>
     `).join('')}</div>`;
 }
 
 function renderHeritageCards() {
-    return `<div class="flex flex-col gap-2">${HERITAGE.map(h => `
-        <div class="card-item bg-white rounded-2xl p-3.5" data-search-text="${h.name} ${(h.tags || []).join(' ')}" onclick="openDetail(HERITAGE.find(x=>x.id==='${h.id}'), 'patrimonio')">
+    if (HERITAGE.length === 0) {
+        return `<div class="empty-state"><div class="empty-state-icon">⛪</div><div class="empty-state-text">No hay patrimonio disponible</div></div>`;
+    }
+    return `
+        <div class="text-xs text-slate-400 mb-2 px-1">${HERITAGE.length} sitios de interes patrimonial</div>
+        <div class="flex flex-col gap-2">${HERITAGE.map(h => `
+        <div class="card-item bg-white rounded-2xl p-3.5" data-search-text="${h.name} ${h.desc} ${(h.tags || []).join(' ')}" onclick="openDetail(HERITAGE.find(x=>x.id==='${h.id}'), 'patrimonio')">
             <div class="flex items-start gap-3">
                 <div class="w-8 h-8 rounded-xl bg-purple-50 text-base flex items-center justify-center flex-shrink-0">⛪</div>
                 <div class="flex-1 min-w-0">
                     <h3 class="font-bold text-sm text-slate-800">${h.name}</h3>
                     <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">${h.desc}</p>
                     <div class="flex gap-1.5 mt-2 flex-wrap">
-                        ${(h.tags || []).map(t => `<span class="tag">${t}</span>`).join('')}
+                        ${(h.tags || []).slice(0, 3).map(t => `<span class="tag">${t}</span>`).join('')}
+                        ${h.future3d ? '<span class="text-[10px] font-semibold text-purple-500 bg-purple-50 px-2 py-0.5 rounded-md">🔮 3D</span>' : ''}
                     </div>
-                    ${h.future3d ? '<span class="text-xs text-purple-500 font-medium mt-1 inline-block">🔮 3D disponible pronto</span>' : ''}
                 </div>
+                <svg class="w-4 h-4 text-slate-300 flex-shrink-0 mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
             </div>
         </div>
     `).join('')}</div>`;
@@ -755,7 +813,12 @@ function renderRouteDetail(route) {
             <p class="text-sm text-slate-600 leading-relaxed mb-5">${route.desc}</p>
 
             <!-- Weather -->
-            <div id="detailWeather" class="mb-4"></div>
+            ${weatherData ? `
+                <div class="mb-4">
+                    <h3 class="text-sm font-bold text-slate-700 mb-2">🌤️ Prevision meteorologica</h3>
+                    ${renderWeatherForecast(weatherData)}
+                </div>
+            ` : '<div id="detailWeather" class="mb-4"></div>'}
 
             <!-- Actions -->
             <div class="flex gap-2">
@@ -775,19 +838,41 @@ function renderRouteDetail(route) {
 
 function renderVillageDetail(village) {
     return `
-        <div class="h-36 relative bg-gradient-to-br from-amber-600 to-amber-800">
+        <div class="h-40 relative bg-gradient-to-br from-amber-600 to-amber-800">
             <button class="detail-close" onclick="closeDetail()">&times;</button>
-            <div class="absolute bottom-4 left-5">
+            <div class="absolute bottom-4 left-5 right-5">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-2xl">🏘️</span>
+                    <span class="text-xs font-semibold text-white/70 uppercase tracking-wider">Pueblo</span>
+                </div>
                 <h2 class="text-xl font-bold text-white">${village.name}</h2>
             </div>
         </div>
         <div class="p-5">
+            <!-- Stats -->
             <div class="flex gap-3 mb-4">
                 ${village.altitude ? `<div class="stat-item flex-1"><div class="stat-value">⛰️ ${village.altitude}m</div><div class="stat-label">Altitud</div></div>` : ''}
                 ${village.population ? `<div class="stat-item flex-1"><div class="stat-value">👥 ${village.population}</div><div class="stat-label">Poblacion</div></div>` : ''}
             </div>
+
+            <!-- Description -->
             <p class="text-sm text-slate-600 leading-relaxed mb-4">${village.desc}</p>
+
+            <!-- Tags -->
             ${village.tags?.length ? `<div class="flex flex-wrap gap-1.5 mb-4">${village.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>` : ''}
+
+            <!-- Weather -->
+            ${weatherData ? `
+                <div class="mb-4">
+                    <h3 class="text-sm font-bold text-slate-700 mb-2">🌤️ Clima en Liebana</h3>
+                    ${renderWeatherForecast(weatherData)}
+                </div>
+            ` : ''}
+
+            <!-- Nearby Routes -->
+            ${renderNearbyRoutes(village.coords)}
+
+            <!-- Actions -->
             <div class="flex gap-2">
                 <button class="action-btn action-btn-primary flex-1" onclick="navigateTo(${village.coords[1]}, ${village.coords[0]})">📍 Como llegar</button>
                 <button class="action-btn action-btn-secondary" onclick="shareItem('${village.name}', ${village.coords[1]}, ${village.coords[0]})">📤</button>
@@ -797,21 +882,47 @@ function renderVillageDetail(village) {
 }
 
 function renderServiceDetail(item) {
+    const serviceInfo = getServiceTypeInfo(item.type);
+    const gradientColors = {
+        restaurantes: 'from-orange-500 to-orange-700',
+        alojamientos: 'from-blue-500 to-blue-700',
+        salud: 'from-rose-500 to-rose-700',
+        farmacias: 'from-green-500 to-green-700',
+        iglesias: 'from-purple-500 to-purple-700',
+        miradores: 'from-cyan-500 to-cyan-700',
+        parking: 'from-slate-500 to-slate-700',
+        agua: 'from-sky-500 to-sky-700'
+    };
+    const gradient = gradientColors[item.type] || 'from-blue-500 to-blue-700';
+
     return `
-        <div class="h-28 relative bg-gradient-to-br from-blue-500 to-blue-700">
+        <div class="h-36 relative bg-gradient-to-br ${gradient}">
             <button class="detail-close" onclick="closeDetail()">&times;</button>
-            <div class="absolute bottom-4 left-5">
-                <span class="text-2xl">${item.icon}</span>
-                <h2 class="text-lg font-bold text-white mt-1">${item.name}</h2>
+            <div class="absolute bottom-4 left-5 right-5">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-2xl">${item.icon}</span>
+                    <span class="text-xs font-semibold text-white/70 uppercase tracking-wider">${serviceInfo?.label || 'Servicio'}</span>
+                </div>
+                <h2 class="text-lg font-bold text-white leading-tight">${item.name}</h2>
             </div>
         </div>
         <div class="p-5">
-            ${item.address ? `<p class="text-sm text-slate-600 mb-2">📍 ${item.address}</p>` : ''}
-            ${item.phone ? `<p class="text-sm mb-2"><a href="tel:${item.phone}" class="text-blue-500 font-medium">📞 ${item.phone}</a></p>` : ''}
-            ${item.website ? `<p class="text-sm mb-2"><a href="${item.website}" target="_blank" class="text-blue-500 font-medium">🌐 Sitio web</a></p>` : ''}
-            ${item.openingHours ? `<p class="text-sm text-slate-600 mb-2">🕐 ${item.openingHours}</p>` : ''}
-            ${item.cuisine ? `<p class="text-sm text-slate-600 mb-2">🍴 ${item.cuisine}</p>` : ''}
-            <div class="flex gap-2 mt-4">
+            <!-- Info -->
+            <div class="flex flex-col gap-2 mb-4">
+                ${item.address ? `<div class="flex items-center gap-2"><span class="text-sm">📍</span><span class="text-sm text-slate-600">${item.address}</span></div>` : ''}
+                ${item.phone ? `<div class="flex items-center gap-2"><span class="text-sm">📞</span><a href="tel:${item.phone}" class="text-sm text-blue-500 font-medium">${item.phone}</a></div>` : ''}
+                ${item.website ? `<div class="flex items-center gap-2"><span class="text-sm">🌐</span><a href="${item.website}" target="_blank" class="text-sm text-blue-500 font-medium truncate">Sitio web</a></div>` : ''}
+                ${item.openingHours ? `<div class="flex items-center gap-2"><span class="text-sm">🕐</span><span class="text-sm text-slate-600">${item.openingHours}</span></div>` : ''}
+                ${item.cuisine ? `<div class="flex items-center gap-2"><span class="text-sm">🍴</span><span class="text-sm text-slate-600">${item.cuisine}</span></div>` : ''}
+                ${item.stars ? `<div class="flex items-center gap-2"><span class="text-sm">⭐</span><span class="text-sm text-slate-600">${item.stars} estrellas</span></div>` : ''}
+                ${item.wheelchair === 'yes' ? `<div class="flex items-center gap-2"><span class="text-sm">♿</span><span class="text-sm text-slate-600">Accesible</span></div>` : ''}
+            </div>
+
+            <!-- Nearby Routes -->
+            ${renderNearbyRoutes(item.coords)}
+
+            <!-- Actions -->
+            <div class="flex gap-2">
                 <button class="action-btn action-btn-primary flex-1" onclick="navigateTo(${item.coords[1]}, ${item.coords[0]})">📍 Como llegar</button>
                 <button class="action-btn action-btn-secondary" onclick="shareItem('${item.name}', ${item.coords[1]}, ${item.coords[0]})">📤</button>
             </div>
@@ -821,16 +932,38 @@ function renderServiceDetail(item) {
 
 function renderHeritageDetail(h) {
     return `
-        <div class="h-36 relative bg-gradient-to-br from-purple-600 to-purple-900">
+        <div class="h-40 relative bg-gradient-to-br from-purple-600 to-purple-900">
             <button class="detail-close" onclick="closeDetail()">&times;</button>
-            <div class="absolute bottom-4 left-5">
-                <h2 class="text-xl font-bold text-white">${h.name}</h2>
+            <div class="absolute bottom-4 left-5 right-5">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-2xl">⛪</span>
+                    <span class="text-xs font-semibold text-white/70 uppercase tracking-wider">Patrimonio</span>
+                </div>
+                <h2 class="text-xl font-bold text-white leading-tight">${h.name}</h2>
             </div>
         </div>
         <div class="p-5">
+            <!-- Description -->
             <p class="text-sm text-slate-600 leading-relaxed mb-4">${h.desc}</p>
+
+            <!-- Tags -->
             ${h.tags?.length ? `<div class="flex flex-wrap gap-1.5 mb-4">${h.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>` : ''}
+
+            <!-- 3D Future -->
             ${h.future3d ? '<div class="p-3 bg-purple-50 rounded-xl mb-4 text-center"><p class="text-sm text-purple-700 font-medium">🔮 Vista 3D disponible proximamente</p></div>' : ''}
+
+            <!-- Weather -->
+            ${weatherData ? `
+                <div class="mb-4">
+                    <h3 class="text-sm font-bold text-slate-700 mb-2">🌤️ Clima en Liebana</h3>
+                    ${renderWeatherForecast(weatherData)}
+                </div>
+            ` : ''}
+
+            <!-- Nearby Routes -->
+            ${renderNearbyRoutes(h.coords)}
+
+            <!-- Actions -->
             <div class="flex gap-2">
                 <button class="action-btn action-btn-primary flex-1" onclick="navigateTo(${h.coords[1]}, ${h.coords[0]})">📍 Como llegar</button>
                 <button class="action-btn action-btn-secondary" onclick="shareItem('${h.name}', ${h.coords[1]}, ${h.coords[0]})">📤</button>
@@ -1109,17 +1242,21 @@ function toggle3DTerrain() {
             });
         }
         map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
-        if (!map.getLayer('sky')) {
-            map.addLayer({
-                id: 'sky', type: 'sky',
-                paint: { 'sky-type': 'atmosphere', 'sky-atmosphere-sun': [0.0, 90.0], 'sky-atmosphere-sun-intensity': 15 }
+        try {
+            map.setSky({
+                'sky-color': '#87CEEB',
+                'sky-horizon-blend': 0.5,
+                'horizon-color': '#ffffff',
+                'horizon-fog-blend': 0.1,
+                'fog-color': '#ffffff',
+                'fog-ground-blend': 0.7
             });
-        }
+        } catch (e) { /* Sky not supported in this version */ }
         map.easeTo({ pitch: 60, duration: 800 });
         if (btn) btn.style.background = 'rgba(27, 94, 32, 0.2)';
     } else {
         map.setTerrain(null);
-        if (map.getLayer('sky')) map.removeLayer('sky');
+        try { map.setSky({}); } catch (e) {}
         map.easeTo({ pitch: 0, duration: 800 });
         if (btn) btn.style.background = '';
     }
@@ -1167,22 +1304,20 @@ function updateWeatherUI() {
     if (!weatherData) return;
     const sidebarWeather = document.getElementById('sidebarWeather');
     if (sidebarWeather) {
-        sidebarWeather.innerHTML = `<span class="text-lg">${weatherData.current.icon}</span><span class="text-sm font-bold text-slate-700 ml-1">${weatherData.current.temp}°</span>`;
+        sidebarWeather.innerHTML = `
+            <div class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-50">
+                <span class="text-lg">${weatherData.current.icon}</span>
+                <span class="text-sm font-bold text-slate-700">${weatherData.current.temp}°</span>
+            </div>`;
     }
-    if (isDetailOpen && selectedFeature?.type === 'ruta') {
-        const dw = document.getElementById('detailWeather');
-        if (dw) dw.innerHTML = renderWeatherForecast(weatherData);
+    // Update weather in detail view if open
+    const dw = document.getElementById('detailWeather');
+    if (dw && isDetailOpen) {
+        dw.innerHTML = renderWeatherForecast(weatherData);
     }
 }
 
 // ==================== UI HELPERS ====================
-function updateTabUI() {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        const tab = btn.getAttribute('data-tab') || btn.textContent.trim().toLowerCase();
-        btn.classList.toggle('active', false);
-    });
-}
-
 function updateFilterUI() {
     document.querySelectorAll('.filter-pill').forEach(btn => {
         const isActive = btn.textContent.includes(DIFF_LABELS[activeFilter]) || (activeFilter === 'all' && btn.textContent.includes('Todas'));
@@ -1215,4 +1350,39 @@ function calcElevationGain(coords) {
 function getElevationStats(coords) {
     const elevs = coords.map(c => c[2] || 0);
     return { maxElev: Math.round(Math.max(...elevs)), minElev: Math.round(Math.min(...elevs)) };
+}
+
+function getNearbyRoutes(coords, maxKm = 5, excludeId = null) {
+    return hikingRoutes
+        .filter(r => r.id !== excludeId)
+        .map(r => {
+            const start = [r.coords[0][0], r.coords[0][1]];
+            const dist = haversine([coords[0], coords[1], 0], [start[0], start[1], 0]);
+            return { ...r, distance: dist };
+        })
+        .filter(r => r.distance <= maxKm)
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 5);
+}
+
+function renderNearbyRoutes(coords, excludeId = null) {
+    const nearby = getNearbyRoutes(coords, 8, excludeId);
+    if (nearby.length === 0) return '';
+    return `
+        <div class="mb-4">
+            <h3 class="text-sm font-bold text-slate-700 mb-2">🥾 Rutas cercanas</h3>
+            <div class="flex flex-col gap-1.5">
+                ${nearby.map(r => `
+                    <div class="flex items-center gap-2.5 p-2 rounded-xl bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors" onclick="closeDetail(); setTimeout(() => openDetail(hikingRoutes.find(x=>x.id==='${r.id}'), 'ruta'), 400)">
+                        <div class="w-6 h-6 rounded-full text-white text-[10px] font-extrabold flex items-center justify-center flex-shrink-0" style="background: ${r.color.main}">${r.num}</div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-xs font-semibold text-slate-700 truncate">${r.name}</p>
+                            <p class="text-[10px] text-slate-400">${r.km} km · ${DIFF_LABELS[r.diff]} · ${r.distance.toFixed(1)} km</p>
+                        </div>
+                        <svg class="w-3.5 h-3.5 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
 }
