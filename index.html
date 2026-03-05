@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1B5E20">
+    <meta name="description" content="78 rutas de senderismo en Liebana y Picos de Europa. Mapa interactivo con altimetria, pueblos, servicios y patrimonio.">
+
+    <title>Liebana - Picos de Europa | Rutas de Senderismo</title>
+
+    <!-- MapLibre GL JS -->
+    <script src="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.css" rel="stylesheet" />
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        brand: { DEFAULT: '#1B5E20', light: '#2E7D32', dark: '#0D3311' },
+                        surface: { DEFAULT: '#FFFFFF', secondary: '#F8FAFC', tertiary: '#F1F5F9' }
+                    },
+                    borderRadius: { '4xl': '28px' },
+                    boxShadow: {
+                        'glass': '0 8px 32px rgba(0,0,0,0.12)',
+                        'float': '0 10px 40px -10px rgba(0,0,0,0.2)',
+                        'sheet': '0 -8px 30px rgba(0,0,0,0.12)'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏔️</text></svg>">
+</head>
+<body class="bg-surface-secondary text-slate-800">
+
+    <!-- ==================== LOADING SCREEN ==================== -->
+    <div id="loader" class="loader">
+        <div class="text-white text-center">
+            <div class="text-5xl mb-4">🏔️</div>
+            <h1 class="text-2xl font-bold tracking-tight">Liebana</h1>
+            <p class="text-sm font-medium opacity-70 mt-1">Picos de Europa</p>
+        </div>
+        <div class="loader-bar">
+            <div class="loader-bar-fill"></div>
+        </div>
+    </div>
+
+    <!-- ==================== MAP ==================== -->
+    <div id="map"></div>
+
+    <!-- ==================== MOBILE TOP BAR ==================== -->
+    <div class="fixed top-0 left-0 right-0 z-40 p-3 pt-safe pointer-events-none mobile-only">
+        <div class="flex items-center gap-3 pointer-events-auto">
+            <!-- Search -->
+            <div class="flex-1 relative">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                </svg>
+                <input type="text" id="mobileSearch" class="search-input glass-strong shadow-glass" placeholder="Buscar rutas, pueblos...">
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== FLOATING MAP CONTROLS ==================== -->
+    <div class="fixed z-40 flex flex-col gap-2" style="top: 70px; right: 12px;" id="mapControls">
+        <button onclick="locateUser()" class="map-control-btn glass-strong shadow-glass" title="Mi ubicacion">
+            <svg class="w-5 h-5 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path d="M12 2v2m0 16v2M2 12h2m16 0h2m-5.64-5.64 1.42-1.42M4.22 19.78l1.42-1.42M19.78 19.78l-1.42-1.42M4.22 4.22l1.42 1.42"/>
+                <circle cx="12" cy="12" r="4"/>
+            </svg>
+        </button>
+        <button onclick="resetView()" class="map-control-btn glass-strong shadow-glass" title="Vista inicial">
+            <svg class="w-5 h-5 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+            </svg>
+        </button>
+        <button onclick="toggleSatellite()" id="btnSatellite" class="map-control-btn glass-strong shadow-glass" title="Satelite">
+            <svg class="w-5 h-5 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/>
+            </svg>
+        </button>
+        <button onclick="toggle3DTerrain()" id="btn3D" class="map-control-btn glass-strong shadow-glass" title="Terreno 3D">
+            <span class="text-sm font-bold text-slate-700">3D</span>
+        </button>
+    </div>
+
+    <!-- ==================== DESKTOP SIDEBAR ==================== -->
+    <aside id="desktopSidebar" class="hidden lg:flex fixed left-6 top-6 bottom-6 w-[400px] glass-strong shadow-float rounded-3xl z-50 flex-col overflow-hidden">
+        <!-- Rendered by app.js -->
+    </aside>
+
+    <!-- ==================== MOBILE BOTTOM SHEET ==================== -->
+    <div id="bottomSheet" class="fixed inset-x-0 bottom-0 z-50 flex flex-col bg-white rounded-t-4xl shadow-sheet mobile-only bottom-sheet" style="height: 85vh;">
+        <!-- Rendered by app.js -->
+    </div>
+
+    <!-- ==================== DETAIL MODAL ==================== -->
+    <div id="detailModal" class="hidden" style="z-index: 60;">
+        <div id="detailOverlay" class="detail-overlay" onclick="closeDetail()"></div>
+        <div id="detailPanel" class="detail-panel custom-scrollbar">
+            <!-- Rendered by app.js -->
+        </div>
+    </div>
+
+    <!-- ==================== 360 FULLSCREEN (Future) ==================== -->
+    <div id="fs360" class="fixed inset-0 z-[100] bg-black hidden flex-col">
+        <button onclick="close360()" class="absolute top-4 right-4 z-10 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center text-xl">&times;</button>
+        <iframe id="fs360Frame" class="w-full h-full border-0" allow="gyroscope; accelerometer; xr-spatial-tracking"></iframe>
+    </div>
+
+    <!-- ==================== SCRIPTS ==================== -->
+    <script src="data.js"></script>
+    <script src="pois.js"></script>
+    <script src="services.js"></script>
+    <script src="weather.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
